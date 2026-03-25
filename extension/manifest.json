@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GitHub -> Feishu Collector",
-  "version": "0.8.16",
+  "version": "0.8.17",
   "description": "从 GitHub 仓库页一键采集项目信息，生成简介并写入飞书多维表格",
   "permissions": ["storage", "activeTab"],
   "host_permissions": ["http://*/*", "https://*/*"],

@@ -16,9 +16,9 @@
           </div>
           <div class="hero__version" id="versionText">v--</div>
         </div>
-        <h1 class="hero__title">看到好项目，顺手收进飞书</h1>
+        <h1 class="hero__title">GitHub 项目一键采集到飞书</h1>
         <p class="hero__subtitle">
-          纯扩展直连，不依赖本地服务。配置模型和飞书后，打开任意 GitHub 仓库页就能一键采集。
+          完成模型接口和飞书配置后，即可在 GitHub 仓库页一键采集并写入多维表格。
         </p>
 
         <div class="hero__meta">
@@ -32,7 +32,7 @@
         <div class="quick-start__header">
           <div>
             <div class="quick-start__title">推荐顺序</div>
-            <div class="quick-start__desc" id="quickStartDesc">建议先完成基础配置和接口测试，再开始采集。</div>
+            <div class="quick-start__desc" id="quickStartDesc">完成基础配置与连通性测试后即可开始采集。</div>
           </div>
           <button class="btn btn--secondary btn--mini" id="guideToggleBtn" type="button">查看引导</button>
         </div>
@@ -89,7 +89,7 @@
           <div class="wizard-step">
             <div>
               <div class="wizard-step__title">第 3 步：检查接口连通性</div>
-              <div class="wizard-step__desc">建议先测模型、再测飞书，避免采集时才发现配置问题。</div>
+              <div class="wizard-step__desc">先完成模型测试与飞书测试，再开始采集，可减少首次接入时的排查成本。</div>
             </div>
             <div class="wizard-step__side wizard-step__side--stack">
               <div class="wizard-step__state" id="wizardTestState">未测试</div>
@@ -133,7 +133,7 @@
           </div>
         </div>
         <div class="inline-note inline-note--compact">
-          “已记住项目”统计的是当前表的本地去重记忆，用来更快跳过重复，不等于飞书里的真实总记录数。若你已从飞书删除旧记录，扩展会在下次采集时自动复核并刷新缓存。
+          “已记住项目”表示当前表的本地去重缓存，不等于飞书中的真实记录总数。若飞书中删除了旧记录，扩展会在下次采集时自动复核并刷新缓存。
         </div>
 
         <div class="result-card result-card--empty" id="recentResultCard">
@@ -222,7 +222,7 @@
 
         <label class="field-label" for="openaiApiKeyInput">模型 API Key</label>
         <input class="field" id="openaiApiKeyInput" type="password" placeholder="sk-..." spellcheck="false" autocomplete="off" />
-        <div class="field-hint">密钥保存在当前浏览器扩展的本地存储中，请在受信设备上使用并妥善管理。</div>
+        <div class="field-hint">配置保存在当前浏览器扩展的本地存储中，请根据所在环境的安全要求管理密钥。</div>
 
         <label class="field-label" for="openaiModelInput">模型名称</label>
         <input class="field" id="openaiModelInput" type="text" placeholder="例如 gpt-4o-mini 或 gemini-3.1-flash-lite" spellcheck="false" />
@@ -298,7 +298,7 @@
           <button class="btn btn--secondary" id="parseFeishuUrlBtn" type="button">解析链接</button>
         </div>
         <div class="field-hint">支持原始 `/base/...` 链接，也支持知识库链接自动补解析。</div>
-        <div class="inline-note inline-note--compact">给其他人使用时，推荐先导入仓库里的 `templates/github-feishu-template.csv`，再回来继续配置。</div>
+        <div class="inline-note inline-note--compact">推荐先导入仓库附带的模板文件，再继续完成飞书配置与字段映射。</div>
         <div class="helper-grid helper-grid--link">
           <article class="helper-card">
             <div class="helper-card__title">推荐：`/base/bas...` 原始链接</div>
@@ -389,9 +389,7 @@
           </div>
         </details>
 
-        <div class="warning-note">
-          纯扩展模式会把密钥保存在浏览器扩展本地存储中。共享设备或多人共用时，建议改为服务端方案。
-        </div>
+        <div class="warning-note">当前版本会将配置保存到浏览器扩展本地存储中。需要集中管理密钥时，建议改造为服务端调用方案。</div>
 
         <div class="action-stack">
           <button class="btn btn--secondary" id="copyFeishuSummaryBtn" type="button">复制当前配置摘要</button>

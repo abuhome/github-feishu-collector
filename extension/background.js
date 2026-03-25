@@ -768,6 +768,7 @@
     let summary = cleanSingleLine(text);
     summary = removeSummaryMarketingTone(summary);
     summary = removeDescriptionEchoSentences(summary, repoData);
+    summary = removeWeakMetadataSentences(summary);
     summary = removeWeakClosingSentences(summary);
     return cleanSingleLine(summary);
   }
@@ -871,20 +872,30 @@
     return cleanSingleLine(filtered.join(" "));
   }
 
+  function removeWeakMetadataSentences(summary) {
+    const sentences = splitSummarySentences(summary);
+    if (sentences.length <= 1) {
+      return summary;
+    }
+
+    const filtered = sentences.filter((sentence) => !isWeakSummarySentence(sentence));
+    return filtered.length > 0 ? cleanSingleLine(filtered.join(" ")) : summary;
+  }
+
   function removeWeakClosingSentences(summary) {
     const sentences = splitSummarySentences(summary);
     if (sentences.length <= 1) {
       return summary;
     }
 
-    while (sentences.length > 1 && isWeakClosingSentence(sentences[sentences.length - 1])) {
+    while (sentences.length > 1 && isWeakSummarySentence(sentences[sentences.length - 1])) {
       sentences.pop();
     }
 
     return cleanSingleLine(sentences.join(" "));
   }
 
-  function isWeakClosingSentence(sentence) {
+  function isWeakSummarySentence(sentence) {
     const text = cleanSingleLine(sentence);
     if (!text) {
       return false;
@@ -892,16 +903,21 @@
 
     const weakPatterns = [
       "项目主要基于",
+      "基于 ",
       "覆盖 ",
       "当前约有",
       "星标",
       "Fork",
+      "star",
+      "fork",
       "社区关注度",
       "活跃度",
       "参考信号",
       "功能边界",
       "当前维护状态",
-      "实现方向"
+      "实现方向",
+      "技术栈",
+      "仓库热度"
     ];
 
     return weakPatterns.some((pattern) => text.includes(pattern));
