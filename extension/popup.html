@@ -118,22 +118,22 @@
           <div class="repo-card__hint" id="repoCardHint">请切到一个 GitHub 仓库主页。</div>
         </div>
 
-        <div class="status-grid">
-          <div class="mini-card">
+        <div class="status-grid status-grid--compact">
+          <div class="mini-card mini-card--compact">
             <div class="mini-card__label">模型状态</div>
             <div class="mini-card__value" id="modelReadyText">待配置</div>
           </div>
-          <div class="mini-card">
+          <div class="mini-card mini-card--compact">
             <div class="mini-card__label">飞书状态</div>
             <div class="mini-card__value" id="feishuReadyText">待配置</div>
           </div>
-          <div class="mini-card mini-card--memory">
+          <div class="mini-card mini-card--compact mini-card--memory">
             <div class="mini-card__label">已记住项目</div>
             <div class="mini-card__value" id="cacheSummaryText">0 条</div>
-            <div class="mini-card__hint">
-              这里统计的是当前表的本地去重记忆，用来更快跳过重复，不等于飞书里的真实总记录数。
-            </div>
           </div>
+        </div>
+        <div class="inline-note inline-note--compact">
+          “已记住项目”统计的是当前表的本地去重记忆，用来更快跳过重复，不等于飞书里的真实总记录数。若你已从飞书删除旧记录，扩展会在下次采集时自动复核并刷新缓存。
         </div>
 
         <div class="result-card result-card--empty" id="recentResultCard">
@@ -243,12 +243,27 @@
         <div class="panel__heading">
           <div>
             <div class="panel__title">飞书配置</div>
-            <div class="panel__value">这里保存飞书应用、多维表格和字段映射信息。测试结果统一显示在下方“运行反馈”里。</div>
+            <div class="panel__value">填写飞书应用与目标表信息，读到字段后确认映射即可开始采集。</div>
+          </div>
+        </div>
+
+        <div class="setup-strip" aria-label="飞书配置步骤">
+          <div class="setup-strip__item">
+            <span class="setup-strip__index">1</span>
+            <span class="setup-strip__text">填 App 凭证</span>
+          </div>
+          <div class="setup-strip__item">
+            <span class="setup-strip__index">2</span>
+            <span class="setup-strip__text">粘贴表格链接</span>
+          </div>
+          <div class="setup-strip__item">
+            <span class="setup-strip__index">3</span>
+            <span class="setup-strip__text">读取字段映射</span>
           </div>
         </div>
 
         <details class="help-panel" id="feishuHelpPanel">
-          <summary class="help-panel__summary">查看飞书配置说明与示例</summary>
+          <summary class="help-panel__summary">需要时查看详细说明</summary>
           <div class="guide-grid guide-grid--single">
             <article class="guide-card">
               <div class="guide-card__title">App ID / App Secret</div>
@@ -256,11 +271,11 @@
             </article>
             <article class="guide-card">
               <div class="guide-card__title">App Token / Table ID</div>
-              <div class="guide-card__text">打开目标多维表格，从地址栏里拿。`/base/` 后面通常是 App Token，`table=tbl...` 那段通常是 Table ID。</div>
+              <div class="guide-card__text">优先直接粘贴多维表格链接，扩展会自动识别；知识库链接也会继续尝试解析。</div>
             </article>
             <article class="guide-card">
-              <div class="guide-card__title">字段映射什么时候要改</div>
-              <div class="guide-card__text">如果你的表头不是默认的“标题、链接、简介、分类”这一套，就在下面把字段名改成你自己的表头。</div>
+              <div class="guide-card__title">字段映射什么时候处理</div>
+              <div class="guide-card__text">读到当前表字段后，只有未命中或你改过表头时才需要手动调整。</div>
             </article>
           </div>
         </details>
@@ -271,67 +286,102 @@
         <label class="field-label" for="feishuAppSecretInput">飞书 App Secret</label>
         <input class="field" id="feishuAppSecretInput" type="password" placeholder="应用密钥" spellcheck="false" autocomplete="off" />
 
-        <label class="field-label" for="feishuAppTokenInput">多维表格 App Token</label>
+        <label class="field-label" for="feishuBitableUrlInput">多维表格链接（可选）</label>
+        <div class="helper-row">
+          <input
+            class="field"
+            id="feishuBitableUrlInput"
+            type="url"
+            placeholder="粘贴 https://xxx.feishu.cn/base/bascn...?table=tbl..."
+            spellcheck="false"
+          />
+          <button class="btn btn--secondary" id="parseFeishuUrlBtn" type="button">解析链接</button>
+        </div>
+        <div class="field-hint">支持原始 `/base/...` 链接，也支持知识库链接自动补解析。</div>
+        <div class="inline-note inline-note--compact">给其他人使用时，推荐先导入仓库里的 `templates/github-feishu-template.csv`，再回来继续配置。</div>
+        <div class="helper-grid helper-grid--link">
+          <article class="helper-card">
+            <div class="helper-card__title">推荐：`/base/bas...` 原始链接</div>
+            <div class="helper-card__text">通常会同时带上 App Token 和 Table ID。</div>
+          </article>
+          <article class="helper-card">
+            <div class="helper-card__title">`wiki/doc` 链接</div>
+            <div class="helper-card__text">可先拿到 Table ID，再继续通过 Wiki API 补解析 App Token。</div>
+          </article>
+        </div>
+        <div class="parse-status hidden" id="linkParseStatus" data-tone="neutral">等待识别多维表格链接</div>
+
+        <div class="field-label-row">
+          <label class="field-label" for="feishuAppTokenInput">多维表格 App Token</label>
+          <span class="field-badge" id="appTokenStatusBadge" data-tone="warning">待补齐</span>
+        </div>
         <input class="field" id="feishuAppTokenInput" type="password" placeholder="bascn..." spellcheck="false" autocomplete="off" />
 
-        <label class="field-label" for="feishuTableIdInput">数据表 Table ID</label>
+        <div class="field-label-row">
+          <label class="field-label" for="feishuTableIdInput">数据表 Table ID</label>
+          <span class="field-badge" id="tableIdStatusBadge" data-tone="warning">待补齐</span>
+        </div>
         <input class="field" id="feishuTableIdInput" type="password" placeholder="tbl..." spellcheck="false" autocomplete="off" />
 
         <details class="mapping-panel" id="fieldMappingPanel">
           <summary class="mapping-panel__summary">字段映射</summary>
-          <div class="mapping-panel__desc">把左侧系统字段映射到你当前飞书表里的真实列名。留空时会自动回退到默认字段名。</div>
+          <div class="mapping-panel__desc">先读取字段，再确认未命中的映射项；其余字段会自动沿用默认值或预匹配结果。</div>
+          <div class="mapping-panel__actions mapping-panel__actions--top">
+            <button class="btn btn--secondary btn--mini" id="loadFieldOptionsBtn" type="button">读取飞书字段</button>
+            <span class="mapping-panel__status" id="fieldListStatus">还没有读取当前表字段</span>
+          </div>
           <div class="mapping-grid">
             <label class="mapping-field">
               <span class="mapping-field__label">标题</span>
-              <input class="field field--compact" id="mappingTitleInput" type="text" data-mapping-key="title" spellcheck="false" />
+              <select class="field field--compact" id="mappingTitleInput" data-mapping-key="title"></select>
             </label>
             <label class="mapping-field">
               <span class="mapping-field__label">链接</span>
-              <input class="field field--compact" id="mappingLinkInput" type="text" data-mapping-key="link" spellcheck="false" />
+              <select class="field field--compact" id="mappingLinkInput" data-mapping-key="link"></select>
             </label>
             <label class="mapping-field">
               <span class="mapping-field__label">简介</span>
-              <input class="field field--compact" id="mappingSummaryInput" type="text" data-mapping-key="summary" spellcheck="false" />
+              <select class="field field--compact" id="mappingSummaryInput" data-mapping-key="summary"></select>
             </label>
             <label class="mapping-field">
               <span class="mapping-field__label">分类</span>
-              <input class="field field--compact" id="mappingCategoryInput" type="text" data-mapping-key="category" spellcheck="false" />
+              <select class="field field--compact" id="mappingCategoryInput" data-mapping-key="category"></select>
             </label>
             <label class="mapping-field">
               <span class="mapping-field__label">星标</span>
-              <input class="field field--compact" id="mappingStarsInput" type="text" data-mapping-key="stars" spellcheck="false" />
+              <select class="field field--compact" id="mappingStarsInput" data-mapping-key="stars"></select>
             </label>
             <label class="mapping-field">
               <span class="mapping-field__label">Fork</span>
-              <input class="field field--compact" id="mappingForksInput" type="text" data-mapping-key="forks" spellcheck="false" />
+              <select class="field field--compact" id="mappingForksInput" data-mapping-key="forks"></select>
             </label>
             <label class="mapping-field">
               <span class="mapping-field__label">语言</span>
-              <input class="field field--compact" id="mappingLanguageInput" type="text" data-mapping-key="language" spellcheck="false" />
+              <select class="field field--compact" id="mappingLanguageInput" data-mapping-key="language"></select>
             </label>
             <label class="mapping-field">
               <span class="mapping-field__label">Topics</span>
-              <input class="field field--compact" id="mappingTopicsInput" type="text" data-mapping-key="topics" spellcheck="false" />
+              <select class="field field--compact" id="mappingTopicsInput" data-mapping-key="topics"></select>
             </label>
             <label class="mapping-field">
               <span class="mapping-field__label">作者</span>
-              <input class="field field--compact" id="mappingAuthorInput" type="text" data-mapping-key="author" spellcheck="false" />
+              <select class="field field--compact" id="mappingAuthorInput" data-mapping-key="author"></select>
             </label>
             <label class="mapping-field">
               <span class="mapping-field__label">仓库名</span>
-              <input class="field field--compact" id="mappingRepoInput" type="text" data-mapping-key="repo" spellcheck="false" />
+              <select class="field field--compact" id="mappingRepoInput" data-mapping-key="repo"></select>
             </label>
             <label class="mapping-field">
               <span class="mapping-field__label">主页</span>
-              <input class="field field--compact" id="mappingHomepageInput" type="text" data-mapping-key="homepage" spellcheck="false" />
+              <select class="field field--compact" id="mappingHomepageInput" data-mapping-key="homepage"></select>
             </label>
             <label class="mapping-field">
               <span class="mapping-field__label">更新时间</span>
-              <input class="field field--compact" id="mappingUpdatedAtInput" type="text" data-mapping-key="updatedAt" spellcheck="false" />
+              <select class="field field--compact" id="mappingUpdatedAtInput" data-mapping-key="updatedAt"></select>
             </label>
             <label class="mapping-field">
               <span class="mapping-field__label">来源</span>
-              <input class="field field--compact" id="mappingSourceInput" type="text" data-mapping-key="source" spellcheck="false" />
+              <select class="field field--compact" id="mappingSourceInput" data-mapping-key="source"></select>
             </label>
           </div>
           <div class="mapping-panel__actions">
@@ -340,7 +390,11 @@
         </details>
 
         <div class="warning-note">
-          纯扩展模式会把密钥保存在浏览器扩展本地存储中。多人协作、统一权限管理或长期共享场景，建议改为服务端方案。
+          纯扩展模式会把密钥保存在浏览器扩展本地存储中。共享设备或多人共用时，建议改为服务端方案。
+        </div>
+
+        <div class="action-stack">
+          <button class="btn btn--secondary" id="copyFeishuSummaryBtn" type="button">复制当前配置摘要</button>
         </div>
 
         <div class="action-grid">

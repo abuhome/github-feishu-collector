@@ -17,6 +17,22 @@
     source: "来源"
   };
 
+  const FIELD_MATCH_ALIASES = {
+    title: ["标题", "名称", "项目名", "项目标题", "仓库标题", "title", "name"],
+    link: ["链接", "地址", "url", "仓库链接", "项目链接", "github链接", "repo url"],
+    summary: ["简介", "描述", "摘要", "介绍", "说明", "summary", "desc", "description"],
+    category: ["分类", "类别", "类目", "赛道", "category"],
+    stars: ["星标", "star", "stars", "收藏数"],
+    forks: ["fork", "forks", "分叉", "复刻"],
+    language: ["语言", "开发语言", "lang", "language"],
+    topics: ["topics", "topic", "标签", "技术标签", "关键词", "tags"],
+    author: ["作者", "维护者", "owner", "创建者", "发布者"],
+    repo: ["仓库名", "仓库", "全名", "repo", "repository", "full name"],
+    homepage: ["主页", "官网", "站点", "homepage", "home"],
+    updatedAt: ["更新时间", "更新日期", "最近更新", "最后更新", "updated at", "pushed at"],
+    source: ["来源", "来源平台", "source"]
+  };
+
   const DEFAULT_CONFIG = {
     githubToken: "",
     modelApiMode: "chat_completions",
@@ -86,6 +102,10 @@
     recentResult: null,
     setupProgress: { ...DEFAULT_SETUP_PROGRESS },
     guideUi: { ...DEFAULT_GUIDE_UI },
+    feishuFieldOptions: [],
+    loadedFeishuFieldNames: [],
+    lastParsedFeishuLink: null,
+    lastAutoMatchedCount: 0,
     collectMotionTimer: 0
   };
 
@@ -107,6 +127,8 @@
     await refreshCurrentTab();
     await refreshReadiness();
     await refreshCacheSummary();
+    updateFieldListStatus("还没有读取当前表字段", "neutral");
+    refreshFeishuLinkIndicators();
     refreshRecentResultCard();
     refreshWizard();
     await loadLogs();
@@ -139,8 +161,16 @@
     elements.saveModelBtn = document.getElementById("saveModelBtn");
     elements.feishuAppIdInput = document.getElementById("feishuAppIdInput");
     elements.feishuAppSecretInput = document.getElementById("feishuAppSecretInput");
+    elements.feishuBitableUrlInput = document.getElementById("feishuBitableUrlInput");
+    elements.parseFeishuUrlBtn = document.getElementById("parseFeishuUrlBtn");
+    elements.linkParseStatus = document.getElementById("linkParseStatus");
     elements.feishuAppTokenInput = document.getElementById("feishuAppTokenInput");
     elements.feishuTableIdInput = document.getElementById("feishuTableIdInput");
+    elements.appTokenStatusBadge = document.getElementById("appTokenStatusBadge");
+    elements.tableIdStatusBadge = document.getElementById("tableIdStatusBadge");
+    elements.loadFieldOptionsBtn = document.getElementById("loadFieldOptionsBtn");
+    elements.fieldListStatus = document.getElementById("fieldListStatus");
+    elements.copyFeishuSummaryBtn = document.getElementById("copyFeishuSummaryBtn");
     elements.saveFeishuBtn = document.getElementById("saveFeishuBtn");
     elements.clearSecretsBtn = document.getElementById("clearSecretsBtn");
     elements.refreshLogsBtn = document.getElementById("refreshLogsBtn");
@@ -193,6 +223,23 @@
     elements.testModelBtn.addEventListener("click", testModelConnection);
     elements.testFeishuBtn.addEventListener("click", testFeishuConnection);
     elements.saveModelBtn.addEventListener("click", saveModelSettings);
+    elements.parseFeishuUrlBtn.addEventListener("click", () => {
+      void applyFeishuUrl({ autoTriggered: false });
+    });
+    elements.feishuBitableUrlInput.addEventListener("paste", () => {
+      window.setTimeout(() => {
+        if (String(elements.feishuBitableUrlInput.value || "").trim()) {
+          void applyFeishuUrl({ autoTriggered: true });
+        }
+      }, 80);
+    });
+    elements.feishuBitableUrlInput.addEventListener("change", () => {
+      if (String(elements.feishuBitableUrlInput.value || "").trim()) {
+        void applyFeishuUrl({ autoTriggered: true });
+      }
+    });
+    elements.loadFieldOptionsBtn.addEventListener("click", loadFeishuFieldOptions);
+    elements.copyFeishuSummaryBtn.addEventListener("click", copyFeishuConfigSummary);
     elements.saveFeishuBtn.addEventListener("click", saveFeishuSettings);
     elements.clearSecretsBtn.addEventListener("click", clearSecrets);
     elements.refreshLogsBtn.addEventListener("click", loadLogs);
@@ -208,6 +255,13 @@
     elements.wizardToFeishuBtn.addEventListener("click", () => {
       switchTab("feishu");
       setFeedback("请先完成飞书配置，保存后再继续测试。", "neutral");
+    });
+    elements.mappingInputs.forEach((input) => {
+      input.addEventListener("change", refreshMappingFieldHighlights);
+    });
+    [elements.feishuAppTokenInput, elements.feishuTableIdInput].forEach((input) => {
+      input.addEventListener("input", refreshFeishuLinkIndicators);
+      input.addEventListener("change", refreshFeishuLinkIndicators);
     });
     elements.wizardTestModelBtn.addEventListener("click", testModelConnection);
     elements.wizardTestFeishuBtn.addEventListener("click", testFeishuConnection);
@@ -229,6 +283,9 @@
       elements.testModelBtn,
       elements.testFeishuBtn,
       elements.saveModelBtn,
+      elements.parseFeishuUrlBtn,
+      elements.loadFieldOptionsBtn,
+      elements.copyFeishuSummaryBtn,
       elements.saveFeishuBtn,
       elements.clearSecretsBtn,
       elements.refreshLogsBtn,
@@ -288,11 +345,7 @@
   }
 
   function fillFieldMapping(fieldMapping) {
-    const normalized = normalizeFieldMapping(fieldMapping);
-    elements.mappingInputs.forEach((input) => {
-      const mappingKey = input.dataset.mappingKey || "";
-      input.value = normalized[mappingKey] || "";
-    });
+    renderFieldMappingOptions(fieldMapping);
   }
 
   function collectFieldMapping() {
@@ -301,6 +354,288 @@
         elements.mappingInputs.map((input) => [input.dataset.mappingKey || "", input.value || ""])
       )
     );
+  }
+
+  function mergeFeishuFieldOptions(items) {
+    const fields = Array.isArray(items) ? items : [];
+    const merged = new Map();
+
+    Object.values(DEFAULT_FIELD_MAPPING).forEach((name) => {
+      merged.set(name, { name, type: "" });
+    });
+
+    fields.forEach((item) => {
+      const name = cleanSingleLine(item && item.name);
+      if (!name) {
+        return;
+      }
+      merged.set(name, {
+        name,
+        type: item && item.type ? String(item.type) : ""
+      });
+    });
+
+    return Array.from(merged.values());
+  }
+
+  function buildSelectOptionsHtml(mappingKey, currentValue) {
+    const defaultLabel = DEFAULT_FIELD_MAPPING[mappingKey] || mappingKey;
+    const baseOptions = mergeFeishuFieldOptions(state.feishuFieldOptions);
+    const current = cleanSingleLine(currentValue);
+    const knownValues = new Set(baseOptions.map((item) => item.name));
+    const options = [];
+
+    options.push(`<option value="">默认：${escapeHtml(defaultLabel)}</option>`);
+
+    if (current && !knownValues.has(current)) {
+      options.push(`<option value="${escapeHtml(current)}">${escapeHtml(current)}（当前映射）</option>`);
+    }
+
+    baseOptions.forEach((item) => {
+      const typeLabel = item.type ? ` · 类型 ${escapeHtml(String(item.type))}` : "";
+      options.push(`<option value="${escapeHtml(item.name)}">${escapeHtml(item.name)}${typeLabel}</option>`);
+    });
+
+    return options.join("");
+  }
+
+  function renderFieldMappingOptions(fieldMapping) {
+    const normalized = normalizeFieldMapping(fieldMapping);
+    elements.mappingInputs.forEach((input) => {
+      const mappingKey = input.dataset.mappingKey || "";
+      const currentValue = normalized[mappingKey] || DEFAULT_FIELD_MAPPING[mappingKey] || "";
+      input.innerHTML = buildSelectOptionsHtml(mappingKey, currentValue);
+      input.value = currentValue === DEFAULT_FIELD_MAPPING[mappingKey] ? "" : currentValue;
+    });
+    refreshMappingFieldHighlights();
+  }
+
+  function autoMatchFieldMapping(fieldItems, currentMapping) {
+    const normalizedCurrent = normalizeFieldMapping(currentMapping);
+    const availableFields = Array.isArray(fieldItems)
+      ? fieldItems
+          .map((item) => cleanSingleLine(item && item.name))
+          .filter(Boolean)
+      : [];
+    const availableSet = new Set(availableFields);
+    const used = new Set();
+    const nextMapping = { ...normalizedCurrent };
+    let matchedCount = 0;
+
+    Object.keys(DEFAULT_FIELD_MAPPING).forEach((mappingKey) => {
+      const currentValue = normalizedCurrent[mappingKey];
+      const keepCurrent =
+        currentValue &&
+        currentValue !== DEFAULT_FIELD_MAPPING[mappingKey] &&
+        availableSet.has(currentValue);
+
+      if (keepCurrent) {
+        used.add(currentValue);
+        return;
+      }
+
+      const bestMatch = findBestFieldMatch(mappingKey, availableFields, used);
+      if (!bestMatch) {
+        return;
+      }
+
+      if (bestMatch.name !== currentValue) {
+        matchedCount += 1;
+      }
+      nextMapping[mappingKey] = bestMatch.name;
+      used.add(bestMatch.name);
+    });
+
+    return {
+      mapping: normalizeFieldMapping(nextMapping),
+      matchedCount
+    };
+  }
+
+  function findBestFieldMatch(mappingKey, availableFields, used) {
+    const aliases = [DEFAULT_FIELD_MAPPING[mappingKey], ...(FIELD_MATCH_ALIASES[mappingKey] || [])];
+    let bestMatch = null;
+
+    availableFields.forEach((fieldName) => {
+      if (used.has(fieldName)) {
+        return;
+      }
+
+      const score = scoreFieldMatch(fieldName, aliases);
+      if (score <= 0) {
+        return;
+      }
+
+      if (!bestMatch || score > bestMatch.score) {
+        bestMatch = {
+          name: fieldName,
+          score
+        };
+      }
+    });
+
+    return bestMatch;
+  }
+
+  function scoreFieldMatch(fieldName, aliases) {
+    const normalizedField = normalizeFieldToken(fieldName);
+    if (!normalizedField) {
+      return 0;
+    }
+
+    let bestScore = 0;
+    aliases.forEach((alias) => {
+      const normalizedAlias = normalizeFieldToken(alias);
+      if (!normalizedAlias) {
+        return;
+      }
+
+      if (normalizedField === normalizedAlias) {
+        bestScore = Math.max(bestScore, 100);
+        return;
+      }
+
+      if (normalizedField.startsWith(normalizedAlias) || normalizedAlias.startsWith(normalizedField)) {
+        bestScore = Math.max(bestScore, 82);
+        return;
+      }
+
+      if (normalizedField.includes(normalizedAlias) || normalizedAlias.includes(normalizedField)) {
+        bestScore = Math.max(bestScore, 68);
+      }
+    });
+
+    return bestScore;
+  }
+
+  function refreshMappingFieldHighlights() {
+    elements.mappingInputs.forEach((input) => {
+      const mappingKey = input.dataset.mappingKey || "";
+      const wrapper = input.closest(".mapping-field");
+      if (!wrapper) {
+        return;
+      }
+      wrapper.classList.toggle("mapping-field--pending", !isFieldMappingResolved(mappingKey, input.value));
+    });
+  }
+
+  function isFieldMappingResolved(mappingKey, currentValue) {
+    if (!Array.isArray(state.loadedFeishuFieldNames) || state.loadedFeishuFieldNames.length === 0) {
+      return true;
+    }
+
+    const selectedValue = cleanSingleLine(currentValue);
+    if (selectedValue) {
+      return state.loadedFeishuFieldNames.includes(selectedValue);
+    }
+
+    const defaultValue = DEFAULT_FIELD_MAPPING[mappingKey] || "";
+    return state.loadedFeishuFieldNames.includes(defaultValue);
+  }
+
+  function countPendingFieldMappings(fieldMapping) {
+    const mapping = normalizeFieldMapping(fieldMapping);
+    return Object.keys(DEFAULT_FIELD_MAPPING).reduce((count, key) => {
+      const currentValue =
+        mapping[key] === DEFAULT_FIELD_MAPPING[key] ? "" : mapping[key];
+      return count + (isFieldMappingResolved(key, currentValue) ? 0 : 1);
+    }, 0);
+  }
+
+  function updateFieldListStatus(message, tone) {
+    if (!elements.fieldListStatus) {
+      return;
+    }
+    elements.fieldListStatus.textContent = message;
+    elements.fieldListStatus.dataset.tone = tone || "neutral";
+  }
+
+  function updateLinkParseStatus(message, tone) {
+    if (!elements.linkParseStatus) {
+      return;
+    }
+
+    if (!message) {
+      elements.linkParseStatus.textContent = "";
+      elements.linkParseStatus.dataset.tone = "neutral";
+      elements.linkParseStatus.classList.add("hidden");
+      return;
+    }
+
+    elements.linkParseStatus.textContent = message;
+    elements.linkParseStatus.dataset.tone = tone || "neutral";
+    elements.linkParseStatus.classList.remove("hidden");
+  }
+
+  function refreshFeishuLinkIndicators() {
+    const appToken = cleanSingleLine(elements.feishuAppTokenInput && elements.feishuAppTokenInput.value);
+    const tableId = cleanSingleLine(elements.feishuTableIdInput && elements.feishuTableIdInput.value);
+    const parsed = isPlainObject(state.lastParsedFeishuLink) ? state.lastParsedFeishuLink : null;
+    const appTokenRecognized = Boolean(parsed && parsed.appToken && parsed.appToken === appToken);
+    const tableIdRecognized = Boolean(parsed && parsed.tableId && parsed.tableId === tableId);
+
+    setFieldBadge(
+      elements.appTokenStatusBadge,
+      appToken ? (appTokenRecognized ? "已识别" : "已补齐") : "待补齐",
+      appToken ? "success" : "warning"
+    );
+    setFieldBadge(
+      elements.tableIdStatusBadge,
+      tableId ? (tableIdRecognized ? "已识别" : "已补齐") : "待补齐",
+      tableId ? "success" : "warning"
+    );
+  }
+
+  function setFieldBadge(element, text, tone) {
+    if (!element) {
+      return;
+    }
+    element.textContent = text;
+    element.dataset.tone = tone || "neutral";
+  }
+
+  function buildFeishuConfigSummary() {
+    const config = collectFormConfig();
+    const pendingCount = countPendingFieldMappings(config.fieldMapping);
+    const mappingIssues = getFieldMappingIssues(config.fieldMapping);
+    const parsed = isPlainObject(state.lastParsedFeishuLink) ? state.lastParsedFeishuLink : null;
+    const loadedFieldCount = Array.isArray(state.loadedFeishuFieldNames) ? state.loadedFeishuFieldNames.length : 0;
+
+    return [
+      `版本：v${state.extensionVersion}`,
+      `飞书 App ID：${maskValue(config.feishuAppId, 4)}`,
+      `飞书 App Secret：${config.feishuAppSecret ? "已填写" : "未填写"}`,
+      `App Token：${maskValue(config.feishuBitableAppToken, 6)}`,
+      `Table ID：${maskValue(config.feishuTableId, 6)}`,
+      `最近识别链接：${parsed ? getFeishuLinkSourceLabel(parsed.sourceType) : "无"}`,
+      `知识库节点：${parsed && parsed.nodeToken ? parsed.nodeToken : "无"}`,
+      `知识库解析：${parsed && parsed.resolvedByApi ? `已通过 API 解析${parsed.resolvedObjType ? `（${parsed.resolvedObjType}）` : ""}` : "未使用"}`,
+      `字段读取：${loadedFieldCount > 0 ? `已读取 ${loadedFieldCount} 个` : "未读取"}`,
+      `自动预匹配：${state.lastAutoMatchedCount || 0} 项`,
+      `待确认映射：${pendingCount} 项`,
+      `映射冲突：${mappingIssues.length > 0 ? mappingIssues.join("、") : "无"}`
+    ].join("\n");
+  }
+
+  async function copyFeishuConfigSummary() {
+    try {
+      await copyText(buildFeishuConfigSummary());
+      setFeedback("当前配置摘要已复制，可直接粘贴到问题反馈或排查记录中。", "success");
+    } catch (error) {
+      setFeedback(`复制配置摘要失败：${toMessage(error)}`, "error");
+    }
+  }
+
+  function maskValue(value, keepLength) {
+    const text = cleanSingleLine(value);
+    if (!text) {
+      return "未填写";
+    }
+    const keep = Math.max(keepLength || 4, 2);
+    if (text.length <= keep) {
+      return `${text}（已填写）`;
+    }
+    return `${text.slice(0, keep)}...（已填写）`;
   }
 
   async function loadConfig() {
@@ -338,9 +673,11 @@
     elements.githubTokenInput.value = mergedConfig.githubToken || "";
     elements.feishuAppIdInput.value = mergedConfig.feishuAppId || "";
     elements.feishuAppSecretInput.value = mergedConfig.feishuAppSecret || "";
+    elements.feishuBitableUrlInput.value = "";
     elements.feishuAppTokenInput.value = mergedConfig.feishuBitableAppToken || "";
     elements.feishuTableIdInput.value = mergedConfig.feishuTableId || "";
     fillFieldMapping(mergedConfig.fieldMapping);
+    refreshFeishuLinkIndicators();
   }
 
   function collectFormConfig() {
@@ -461,6 +798,7 @@
     const result = state.recentResult;
     if (!result || !elements.recentResultRepo || !elements.recentResultMeta) {
       elements.recentResultCard.classList.add("result-card--empty");
+      elements.recentResultCard.classList.remove("result-card--filled");
       elements.recentResultBadge.textContent = "等待采集";
       elements.recentResultBadge.className = "result-pill result-pill--neutral";
       elements.recentResultAi.textContent = "尚未生成";
@@ -473,6 +811,7 @@
     }
 
     elements.recentResultCard.classList.remove("result-card--empty");
+    elements.recentResultCard.classList.add("result-card--filled");
     const statusText = result.skippedDuplicate ? "已跳过重复" : "已新建记录";
     const aiText = result.aiUsed ? "AI 已调用" : "AI 已回退";
     const timeText = result.collectedAt ? formatDateTime(result.collectedAt) : "刚刚";
@@ -481,8 +820,7 @@
     elements.recentResultAi.textContent = aiText;
     elements.recentResultAi.className = `result-pill ${result.aiUsed ? "result-pill--success" : "result-pill--neutral"}`;
     elements.recentResultRepo.textContent = result.repo || "未知仓库";
-    elements.recentResultMeta.textContent =
-      `结果：${statusText} · 分类：${result.category || "未分类"} · ${aiText} · ${timeText}`;
+    elements.recentResultMeta.textContent = `分类：${result.category || "未分类"} · ${timeText}`;
     if (result.url) {
       elements.recentResultLink.href = result.url;
       elements.recentResultLink.classList.remove("hidden");
@@ -608,13 +946,33 @@
     setFeedback("模型配置已保存。之后回到“采集”页点“测试模型”即可验证。", "success");
   }
 
-  async function saveFeishuSettings() {
+  async function persistFeishuSettings(options) {
+    const settings = isPlainObject(options) ? options : {};
     const nextConfig = collectFormConfig();
     state.config = nextConfig;
     await chrome.storage.local.set(nextConfig);
-    await updateSetupProgress({ feishuTestOk: false, feishuTestAt: "" });
+    if (settings.resetFeishuTest !== false) {
+      await updateSetupProgress({ feishuTestOk: false, feishuTestAt: "" });
+    }
     await refreshReadiness();
     await refreshCacheSummary();
+    if (settings.resetFieldOptions !== false) {
+      state.feishuFieldOptions = [];
+      state.loadedFeishuFieldNames = [];
+    }
+    renderFieldMappingOptions(nextConfig.fieldMapping);
+    refreshFeishuLinkIndicators();
+    if (settings.statusMessage) {
+      updateFieldListStatus(settings.statusMessage, settings.statusTone || "neutral");
+    }
+    return nextConfig;
+  }
+
+  async function saveFeishuSettings() {
+    const nextConfig = await persistFeishuSettings({
+      statusMessage: "飞书配置已更新，建议重新读取当前表字段",
+      statusTone: "neutral"
+    });
     const mappingIssues = getFieldMappingIssues(nextConfig.fieldMapping);
     setFeedback(
       mappingIssues.length > 0
@@ -627,6 +985,271 @@
   function resetFieldMapping() {
     fillFieldMapping(DEFAULT_FIELD_MAPPING);
     setFeedback("字段映射已恢复为默认字段名。保存飞书配置后会正式生效。", "success");
+  }
+
+  async function applyFeishuUrl(options) {
+    const settings = isPlainObject(options) ? options : {};
+    const autoTriggered = Boolean(settings.autoTriggered);
+    const parsed = parseFeishuBitableUrl(elements.feishuBitableUrlInput.value);
+    if (!parsed) {
+      state.lastParsedFeishuLink = null;
+      updateLinkParseStatus("", "neutral");
+      refreshFeishuLinkIndicators();
+      if (!autoTriggered) {
+        setFeedback("多维表格链接无法识别，请确认粘贴的是飞书多维表格页面地址。", "error");
+      }
+      return;
+    }
+
+    setButtonsLoading([elements.parseFeishuUrlBtn], true, "解析中...");
+    state.lastParsedFeishuLink = parsed;
+
+    if (parsed.tableId) {
+      elements.feishuTableIdInput.value = parsed.tableId;
+    }
+
+    const hasFeishuSecrets = Boolean(
+      String(elements.feishuAppIdInput.value || "").trim() &&
+        String(elements.feishuAppSecretInput.value || "").trim()
+    );
+
+    let resolvedWikiToken = "";
+    let resolvedWikiType = "";
+    let wikiResolveError = "";
+
+    if (parsed.appToken) {
+      elements.feishuAppTokenInput.value = parsed.appToken;
+    } else if (parsed.nodeToken && hasFeishuSecrets) {
+      try {
+        updateLinkParseStatus("知识库链接已识别，正在通过 Wiki API 解析 App Token...", "neutral");
+        const resolved = await sendRuntimeMessage({
+          type: "resolveWikiNode",
+          nodeToken: parsed.nodeToken,
+          config: collectFormConfig()
+        });
+        resolvedWikiToken = cleanSingleLine(resolved.objToken);
+        resolvedWikiType = cleanSingleLine(resolved.objType);
+        if (resolvedWikiToken) {
+          elements.feishuAppTokenInput.value = resolvedWikiToken;
+          state.lastParsedFeishuLink = {
+            ...parsed,
+            appToken: resolvedWikiToken,
+            resolvedByApi: true,
+            resolvedObjType: resolvedWikiType
+          };
+        }
+      } catch (error) {
+        wikiResolveError = toMessage(error);
+        updateLinkParseStatus(`知识库节点已识别，但解析 App Token 失败：${wikiResolveError}`, "warning");
+      }
+    } else if (parsed.nodeToken) {
+      updateLinkParseStatus("知识库链接已识别。补齐 App ID 和 App Secret 后，可自动通过 Wiki API 解析 App Token。", "neutral");
+    }
+
+    const feedbackParts = [];
+    const effectiveAppToken = cleanSingleLine(elements.feishuAppTokenInput.value);
+    if (effectiveAppToken) {
+      feedbackParts.push(`App Token：${effectiveAppToken}`);
+    }
+    if (parsed.tableId) {
+      feedbackParts.push(`Table ID：${parsed.tableId}`);
+    }
+
+    if (feedbackParts.length === 0) {
+      refreshFeishuLinkIndicators();
+      setButtonsLoading([elements.parseFeishuUrlBtn], false);
+      if (!autoTriggered) {
+        setFeedback("链接已识别，但没有找到 App Token 或 Table ID，请检查链接是否完整。", "warning");
+      }
+      return;
+    }
+
+    await persistFeishuSettings({
+      statusMessage: "已从链接提取参数，飞书配置已自动保存",
+      statusTone: "success"
+    });
+    refreshFeishuLinkIndicators();
+
+    const currentAppToken = String(elements.feishuAppTokenInput.value || "").trim();
+    const wikiOnlyTableLink =
+      !effectiveAppToken && Boolean(parsed.tableId) && Boolean(parsed.appTokenMissingReason);
+    const appTokenStillMissing = wikiOnlyTableLink && !currentAppToken;
+    const sourceLabel = getFeishuLinkSourceLabel(parsed.sourceType);
+
+    if (appTokenStillMissing) {
+      setButtonsLoading([elements.parseFeishuUrlBtn], false);
+      if (wikiResolveError) {
+        updateLinkParseStatus(
+          `${sourceLabel}：已提取 Table ID，但自动解析 App Token 失败：${wikiResolveError}`,
+          "warning"
+        );
+        updateFieldListStatus("Table ID 已提取，但自动解析 App Token 失败，请检查飞书权限或改用原始多维表格链接", "warning");
+        if (!autoTriggered) {
+          setFeedback(
+            `已提取 ${feedbackParts.join(" · ")}，但自动解析 App Token 失败：${wikiResolveError}`,
+            "warning"
+          );
+        }
+      } else if (!hasFeishuSecrets && parsed.nodeToken) {
+        updateLinkParseStatus(
+          `${sourceLabel}：已提取 Table ID。补齐 App ID 和 App Secret 后，可继续自动解析 App Token。`,
+          "warning"
+        );
+        updateFieldListStatus("Table ID 已提取；补齐 App ID 与 App Secret 后，可自动解析 App Token", "warning");
+        if (!autoTriggered) {
+          setFeedback(
+            `已提取 ${feedbackParts.join(" · ")}。这是知识库链接，继续补齐 App ID 和 App Secret 后，扩展会自动解析 App Token。`,
+            "warning"
+          );
+        }
+      } else {
+        updateLinkParseStatus(
+          `${sourceLabel}：已提取 Table ID，但当前链接不包含 App Token。请改用 /base/bas... 原始多维表格链接，或手动填写 App Token。`,
+          "warning"
+        );
+        updateFieldListStatus("已提取 Table ID，但当前链接不包含 App Token，请改用 /base/bas... 链接或手动填写 App Token", "warning");
+        if (!autoTriggered) {
+          setFeedback(
+            `已提取 ${feedbackParts.join(" · ")}，但这个链接属于知识库/文档页，不包含多维表格 App Token。请打开多维表格原始页面后复制 /base/bas... 链接，或手动填写 App Token。`,
+            "warning"
+          );
+        }
+      }
+      return;
+    }
+
+    if (hasFeishuSecrets) {
+      updateLinkParseStatus(
+        effectiveAppToken
+          ? resolvedWikiToken
+            ? `${sourceLabel}：已通过 Wiki API 解析 App Token${resolvedWikiType ? `（obj_type=${resolvedWikiType}）` : ""}，正在继续自动读取当前表字段。`
+            : `${sourceLabel}：已识别 App Token 和 Table ID，正在继续自动读取当前表字段。`
+          : `${sourceLabel}：已更新 Table ID，沿用当前 App Token，正在继续自动读取当前表字段。`,
+        "success"
+      );
+      updateFieldListStatus("已从链接提取参数，正在自动读取当前表字段...", "neutral");
+      const fields = await loadFeishuFieldOptions({ silent: true });
+      setButtonsLoading([elements.parseFeishuUrlBtn], false);
+      if (fields.length > 0) {
+        const autoMatchText =
+          state.lastAutoMatchedCount > 0 ? `，自动预匹配了 ${state.lastAutoMatchedCount} 项字段映射` : "";
+        setFeedback(
+          `已从链接中提取 ${feedbackParts.join(" · ")}，并自动读取了 ${fields.length} 个飞书字段${autoMatchText}。`,
+          "success"
+        );
+        return;
+      }
+
+      setFeedback(
+        `已从链接中提取 ${feedbackParts.join(" · ")}，并已自动尝试读取字段。若字段列表未显示，可检查权限后再点“读取飞书字段”。`,
+        "warning"
+      );
+      return;
+    }
+
+    setButtonsLoading([elements.parseFeishuUrlBtn], false);
+    updateLinkParseStatus(
+      parsed.appToken
+        ? `${sourceLabel}：已识别并自动保存 App Token 与 Table ID。`
+        : `${sourceLabel}：已识别并自动保存 Table ID。补齐 App ID / App Secret 后可继续自动读取字段。`,
+      "success"
+    );
+    updateFieldListStatus(
+      appTokenStillMissing
+        ? "已提取 Table ID 并自动保存；当前链接不包含 App Token，请补充 App Token 后继续"
+        : "已从链接提取参数并自动保存，补齐 App ID / App Secret 后可自动读取字段",
+      appTokenStillMissing ? "warning" : "neutral"
+    );
+    if (!autoTriggered) {
+      setFeedback(
+        appTokenStillMissing
+          ? `已提取并自动保存 ${feedbackParts.join(" · ")}，但这个链接不包含 App Token。请改用多维表格原始链接，或手动补充 App Token。`
+          : `已从链接中提取并自动保存 ${feedbackParts.join(" · ")}。补齐 App ID 和 App Secret 后，就能继续自动读取飞书字段。`,
+        appTokenStillMissing ? "warning" : "success"
+      );
+    }
+  }
+
+  async function loadFeishuFieldOptions(options) {
+    const settings = isPlainObject(options) ? options : {};
+    const silent = Boolean(settings.silent);
+    const config = collectFormConfig();
+    const missing = getMissingFeishuFields(config);
+
+    if (missing.length > 0) {
+      if (!silent) {
+        setFeedback(`请先补齐飞书配置：${missing.join("、")}`, "error");
+      }
+      return [];
+    }
+
+    state.config = config;
+    await chrome.storage.local.set(config);
+    setButtonsLoading([elements.loadFieldOptionsBtn], true, "读取中...");
+    state.lastAutoMatchedCount = 0;
+
+    try {
+      const result = await sendRuntimeMessage({
+        type: "listFeishuFields",
+        config
+      });
+      const fields = Array.isArray(result.fields) ? result.fields : [];
+      state.loadedFeishuFieldNames = fields
+        .map((item) => cleanSingleLine(item && item.name))
+        .filter(Boolean);
+      state.feishuFieldOptions = mergeFeishuFieldOptions(fields);
+      const autoMatched = autoMatchFieldMapping(fields, config.fieldMapping);
+      state.lastAutoMatchedCount = autoMatched.matchedCount;
+      renderFieldMappingOptions(autoMatched.mapping);
+      const pendingCount = countPendingFieldMappings(autoMatched.mapping);
+
+      if (fields.length > 0 && autoMatched.matchedCount > 0) {
+        await persistFeishuSettings({
+          resetFieldOptions: false,
+          resetFeishuTest: false,
+          statusMessage:
+            pendingCount > 0
+              ? `已读取 ${fields.length} 个字段，已自动预匹配 ${autoMatched.matchedCount} 项，剩余 ${pendingCount} 项待确认`
+              : `已读取 ${fields.length} 个字段，已自动预匹配 ${autoMatched.matchedCount} 项`,
+          statusTone: "success"
+        });
+      } else {
+        updateFieldListStatus(
+          fields.length > 0
+            ? pendingCount > 0
+              ? `已读取 ${fields.length} 个字段，剩余 ${pendingCount} 项待确认`
+              : `已读取 ${fields.length} 个字段`
+            : "当前表没有可用字段",
+          fields.length > 0 ? "success" : "warning"
+        );
+      }
+
+      if (!silent) {
+        setFeedback(
+          fields.length > 0
+            ? autoMatched.matchedCount > 0
+              ? pendingCount > 0
+                ? `飞书字段已加载，并自动预匹配了 ${autoMatched.matchedCount} 项映射；未命中的项已高亮。`
+                : `飞书字段已加载，并自动预匹配了 ${autoMatched.matchedCount} 项映射。`
+              : pendingCount > 0
+                ? "飞书字段已加载，未命中的项已高亮，可直接补选。"
+                : "飞书字段已加载，可以直接在下拉框里选择映射。"
+            : "字段列表读取完成，但当前表没有返回可用字段。",
+          fields.length > 0 ? "success" : "warning"
+        );
+      }
+
+      return fields;
+    } catch (error) {
+      updateFieldListStatus("读取字段失败", "error");
+      if (!silent) {
+        setFeedback(`读取飞书字段失败：${toMessage(error)}`, "error");
+      }
+      return [];
+    } finally {
+      setButtonsLoading([elements.loadFieldOptionsBtn], false);
+      await loadLogs();
+    }
   }
 
   async function clearSecrets() {
@@ -645,10 +1268,16 @@
     };
 
     fillForm(state.config);
+    state.feishuFieldOptions = [];
+    state.loadedFeishuFieldNames = [];
+    state.lastParsedFeishuLink = null;
     await chrome.storage.local.set(state.config);
     await updateSetupProgress(DEFAULT_SETUP_PROGRESS);
     await refreshReadiness();
     await refreshCacheSummary();
+    updateFieldListStatus("还没有读取当前表字段", "neutral");
+    updateLinkParseStatus("", "neutral");
+    refreshFeishuLinkIndicators();
     setFeedback("敏感配置已清空。", "success");
   }
 
@@ -712,6 +1341,7 @@
         feishuTestOk: true,
         feishuTestAt: new Date().toISOString()
       });
+      await loadFeishuFieldOptions({ silent: true });
       setFeedback(`飞书鉴权通过，Token 预览：${result.tokenPreview || "-"}`, "success");
     } catch (error) {
       await updateSetupProgress({
@@ -966,6 +1596,91 @@
     };
   }
 
+  function parseFeishuBitableUrl(input) {
+    const raw = String(input || "").trim();
+    if (!raw) {
+      return null;
+    }
+
+    let url;
+    try {
+      url = new URL(raw);
+    } catch {
+      return null;
+    }
+
+    const hostname = url.hostname.toLowerCase();
+    if (!hostname.includes("feishu.cn") && !hostname.includes("larksuite.com")) {
+      return null;
+    }
+
+    const segments = url.pathname.split("/").filter(Boolean);
+    const pathType = segments[0] ? segments[0].toLowerCase() : "";
+    const nodeToken =
+      ["wiki", "docx", "docs", "sheet"].includes(pathType) && segments[1]
+        ? segments[1]
+        : "";
+    const baseIndex = segments.findIndex((segment) => segment.toLowerCase() === "base");
+    const appToken =
+      baseIndex >= 0 && segments[baseIndex + 1]
+        ? segments[baseIndex + 1]
+        : segments.find((segment) => /^bas[a-z0-9]+$/i.test(segment)) || "";
+
+    const tableId =
+      readTableIdFromParams(url.searchParams) ||
+      readTableIdFromHash(url.hash) ||
+      "";
+
+    if (!appToken && !tableId) {
+      return null;
+    }
+
+    return {
+      appToken: cleanSingleLine(appToken),
+      tableId: cleanSingleLine(tableId),
+      nodeToken: cleanSingleLine(nodeToken),
+      sourceType: pathType,
+      appTokenMissingReason:
+        !appToken && ["wiki", "docx", "docs", "sheet"].includes(pathType)
+          ? "当前链接是知识库/文档页，不包含多维表格 App Token"
+          : ""
+    };
+  }
+
+  function getFeishuLinkSourceLabel(sourceType) {
+    switch (String(sourceType || "").toLowerCase()) {
+      case "base":
+        return "原始多维表格链接";
+      case "wiki":
+        return "知识库链接";
+      case "docx":
+      case "docs":
+        return "文档链接";
+      case "sheet":
+        return "表格链接";
+      default:
+        return "飞书链接";
+    }
+  }
+
+  function readTableIdFromParams(params) {
+    if (!params) {
+      return "";
+    }
+    return params.get("table") || params.get("table_id") || "";
+  }
+
+  function readTableIdFromHash(hash) {
+    const cleanedHash = String(hash || "").replace(/^#/, "");
+    if (!cleanedHash) {
+      return "";
+    }
+
+    const queryText = cleanedHash.includes("?") ? cleanedHash.split("?")[1] : cleanedHash;
+    const params = new URLSearchParams(queryText);
+    return readTableIdFromParams(params);
+  }
+
   function normalizeRepoIdentity(value) {
     const input = String(value || "").trim();
     if (!input) {
@@ -1100,6 +1815,21 @@
 
   function normalizeLooseText(value) {
     return cleanSingleLine(value).toLowerCase();
+  }
+
+  function normalizeFieldToken(value) {
+    return cleanSingleLine(value)
+      .toLowerCase()
+      .replace(/[\s_\-./()[\]{}:：，,。、“”"'`]+/g, "");
+  }
+
+  function escapeHtml(value) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   function isPlainObject(value) {

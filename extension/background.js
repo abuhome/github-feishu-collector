@@ -1,19 +1,6 @@
 (function () {
   "use strict";
 
-  const DEFAULT_CONFIG = {
-    githubToken: "",
-    modelApiMode: "chat_completions",
-    openaiBaseUrl: "https://api.openai.com/v1",
-    openaiApiKey: "",
-    openaiModel: "gpt-4o-mini",
-    feishuAppId: "",
-    feishuAppSecret: "",
-    feishuBitableAppToken: "",
-    feishuTableId: "",
-    fieldMapping: null
-  };
-
   const DEFAULT_FIELD_MAPPING = {
     title: "标题",
     link: "链接",
@@ -28,6 +15,19 @@
     homepage: "主页",
     updatedAt: "更新时间",
     source: "来源"
+  };
+
+  const DEFAULT_CONFIG = {
+    githubToken: "",
+    modelApiMode: "chat_completions",
+    openaiBaseUrl: "https://api.openai.com/v1",
+    openaiApiKey: "",
+    openaiModel: "gpt-4o-mini",
+    feishuAppId: "",
+    feishuAppSecret: "",
+    feishuBitableAppToken: "",
+    feishuTableId: "",
+    fieldMapping: { ...DEFAULT_FIELD_MAPPING }
   };
 
   const CATEGORY_OPTIONS = [
@@ -139,6 +139,10 @@
           ? handleTestModelMessage(message)
           : message.type === "testFeishu"
             ? handleTestFeishuMessage(message)
+            : message.type === "listFeishuFields"
+              ? handleListFeishuFieldsMessage(message)
+            : message.type === "resolveWikiNode"
+              ? handleResolveWikiNodeMessage(message)
             : message.type === "clearCollectionCache"
               ? clearCollectionCache()
               : null;
@@ -195,6 +199,56 @@
     return {
       tokenPreview: token ? `${token.slice(0, 8)}...` : ""
     };
+  }
+
+  async function handleListFeishuFieldsMessage(message) {
+    const config = mergeConfig(message && message.config ? message.config : {});
+    const missing = [
+      ["飞书 App ID", config.feishuAppId],
+      ["飞书 App Secret", config.feishuAppSecret],
+      ["飞书多维表格 App Token", config.feishuBitableAppToken],
+      ["飞书数据表 Table ID", config.feishuTableId]
+    ]
+      .filter((item) => !item[1])
+      .map((item) => item[0]);
+
+    if (missing.length > 0) {
+      throw new Error(`请先补齐飞书配置：${missing.join("、")}`);
+    }
+
+    const tenantAccessToken = await getFeishuTenantAccessToken(config);
+    const fields = await listFeishuFields(config, tenantAccessToken);
+    await appendLog("info", "feishu", `已读取飞书字段：${fields.length} 个`);
+
+    return {
+      fields
+    };
+  }
+
+  async function handleResolveWikiNodeMessage(message) {
+    const config = mergeConfig(message && message.config ? message.config : {});
+    const nodeToken = cleanSingleLine(message && message.nodeToken);
+    if (!nodeToken) {
+      throw new Error("缺少知识库节点 node_token");
+    }
+
+    await appendLog("info", "feishu", `开始通过 Wiki API 解析知识库节点：${nodeToken}`);
+    const tenantAccessToken = await getFeishuTenantAccessToken(config);
+    const nodeInfo = await resolveWikiNodeInfo(nodeToken, tenantAccessToken);
+    if (!nodeInfo.objToken) {
+      throw new Error(
+        nodeInfo.objType
+          ? `Wiki API 已返回节点信息，但没有拿到 App Token（obj_type=${nodeInfo.objType}）。请确认该知识库节点挂载的是多维表格，并且当前应用拥有对应文档与多维表格权限。`
+          : "Wiki API 已返回节点信息，但没有拿到 App Token。请确认该知识库节点挂载的是多维表格，并且当前应用拥有对应文档与多维表格权限。"
+      );
+    }
+    await appendLog(
+      "info",
+      "feishu",
+      `知识库节点已解析：${nodeToken} · obj_type=${nodeInfo.objType || "-"}`
+    );
+
+    return nodeInfo;
   }
 
   async function clearCollectionCache() {
@@ -407,7 +461,7 @@
         categoryOptions: CATEGORY_OPTIONS,
         task: {
           summary:
-            "生成一个简体中文简介，控制在 150 到 220 个字，尽量两到三句。先说明项目核心能力，再补充适用场景、亮点、适合谁使用或为什么值得收藏，内容要具体，不要空话，也不要写成广告文案。",
+            "生成一个客观、克制的简体中文简介，控制在 130 到 180 个字，尽量两到三句。先说明项目做什么，再补充实现特点、适用场景或能力边界。结尾停在功能、流程或使用场景上，不要用技术栈、星标、Fork、活跃度、社区关注度这类信息收尾。不要照抄仓库 description，不要在结尾再追加一遍原始简介，也不要使用“值得收藏”“非常适合”“如果你正在找”这类推荐口吻。",
           category: "从 categoryOptions 中挑一个最合适的分类。",
           tags: "给出 3 到 5 个短标签，优先使用通用技术词。"
         },
@@ -574,7 +628,7 @@
     const paragraph = cleanSingleLine(extractFirstMeaningfulParagraph(readme));
     const summary = normalizeProjectSummary(
       [description, paragraph].filter(Boolean).join(" "),
-      description || paragraph || `${repoData.name} 是一个值得关注的 GitHub 项目`,
+      description || paragraph || `${repoData.name} 是一个 GitHub 项目`,
       repoData
     );
 
@@ -680,14 +734,14 @@
   }
 
   function normalizeProjectSummary(candidate, fallback, repoData) {
-    const cleanedCandidate = cleanSingleLine(candidate);
-    const pieces = [
-      cleanedCandidate,
-      cleanSingleLine(fallback),
-      buildRepoTechSentence(repoData),
-      buildRepoAudienceSentence(repoData),
-      buildRepoSignalSentence(repoData)
-    ].filter(Boolean);
+    const cleanedCandidate = sanitizeSummaryBlock(candidate, repoData);
+    const cleanedFallback = sanitizeSummaryBlock(fallback, repoData);
+    const candidateReady = cleanedCandidate.length >= 100;
+    const pieces = [cleanedCandidate];
+
+    if (!candidateReady && cleanedFallback) {
+      pieces.push(cleanedFallback);
+    }
 
     const sentences = [];
     const seen = new Set();
@@ -703,17 +757,19 @@
       });
     });
 
-    let summary = cleanSingleLine(sentences.join(" "));
-    if (summary.length < 140) {
-      summary = cleanSingleLine(
-        [
-          summary,
-          "适合在做同类工具选型、整理灵感、学习源码或寻找现成实现时作为参考。"
-        ].join(" ")
-      );
+    let summary = sanitizeSummaryBlock(sentences.join(" "), repoData);
+    if (summary.length < 80 && cleanedFallback && !summary.includes(cleanedFallback)) {
+      summary = sanitizeSummaryBlock([summary, cleanedFallback].join(" "), repoData);
     }
+    return trimText(summary, 200);
+  }
 
-    return trimText(summary, 220);
+  function sanitizeSummaryBlock(text, repoData) {
+    let summary = cleanSingleLine(text);
+    summary = removeSummaryMarketingTone(summary);
+    summary = removeDescriptionEchoSentences(summary, repoData);
+    summary = removeWeakClosingSentences(summary);
+    return cleanSingleLine(summary);
   }
 
   function normalizeLooseText(value) {
@@ -753,10 +809,10 @@
 
     const description = cleanSingleLine(repoData.description || "");
     if (description && description.length >= 36) {
-      return "如果你正在找同类方案、想整理灵感库，或者想快速判断这个项目值不值得深入看，这个仓库会比较有参考价值。";
+      return "整体更偏向同类方案对比、功能参考和实现思路梳理这类场景。";
     }
 
-    return "更适合想找同类方案、做项目收藏、快速理解能力边界的开发者或内容整理用户。";
+    return "整体更适合作为同类工具选型、能力边界判断和源码浏览时的参考。";
   }
 
   function buildRepoSignalSentence(repoData) {
@@ -773,7 +829,109 @@
       return "";
     }
 
-    return `${starText}${forkText}，也能帮助你大致判断它在 GitHub 上的关注度。`;
+    return `${starText}${forkText}，可以作为项目活跃度和社区关注度的参考信号。`;
+  }
+
+  function removeSummaryMarketingTone(summary) {
+    const sentences = splitSummarySentences(summary);
+    if (sentences.length <= 1) {
+      return summary;
+    }
+
+    const blockedPhrases = [
+      "值得收藏",
+      "值得关注",
+      "非常适合",
+      "如果你正在找",
+      "如果你想",
+      "推荐给",
+      "不妨",
+      "比较有参考价值"
+    ];
+    const filtered = sentences.filter((sentence) => !blockedPhrases.some((phrase) => sentence.includes(phrase)));
+    return filtered.length > 0 ? cleanSingleLine(filtered.join(" ")) : summary;
+  }
+
+  function removeDescriptionEchoSentences(summary, repoData) {
+    const description = cleanSingleLine(repoData && repoData.description);
+    if (!description) {
+      return summary;
+    }
+
+    const sentences = splitSummarySentences(summary);
+    if (sentences.length <= 1) {
+      return summary;
+    }
+
+    const filtered = sentences.filter((sentence) => !isLikelyDescriptionEcho(sentence, description));
+    if (filtered.length === 0) {
+      return summary;
+    }
+
+    return cleanSingleLine(filtered.join(" "));
+  }
+
+  function removeWeakClosingSentences(summary) {
+    const sentences = splitSummarySentences(summary);
+    if (sentences.length <= 1) {
+      return summary;
+    }
+
+    while (sentences.length > 1 && isWeakClosingSentence(sentences[sentences.length - 1])) {
+      sentences.pop();
+    }
+
+    return cleanSingleLine(sentences.join(" "));
+  }
+
+  function isWeakClosingSentence(sentence) {
+    const text = cleanSingleLine(sentence);
+    if (!text) {
+      return false;
+    }
+
+    const weakPatterns = [
+      "项目主要基于",
+      "覆盖 ",
+      "当前约有",
+      "星标",
+      "Fork",
+      "社区关注度",
+      "活跃度",
+      "参考信号",
+      "功能边界",
+      "当前维护状态",
+      "实现方向"
+    ];
+
+    return weakPatterns.some((pattern) => text.includes(pattern));
+  }
+
+  function isLikelyDescriptionEcho(sentence, description) {
+    const normalizedSentence = normalizeLooseText(sentence);
+    const normalizedDescription = normalizeLooseText(description);
+    if (!normalizedSentence || !normalizedDescription) {
+      return false;
+    }
+
+    if (
+      normalizedSentence === normalizedDescription ||
+      normalizedSentence.includes(normalizedDescription) ||
+      normalizedDescription.includes(normalizedSentence)
+    ) {
+      return true;
+    }
+
+    return sharedPrefixLength(normalizedSentence, normalizedDescription) >= 14;
+  }
+
+  function sharedPrefixLength(left, right) {
+    const max = Math.min(left.length, right.length);
+    let count = 0;
+    while (count < max && left[count] === right[count]) {
+      count += 1;
+    }
+    return count;
   }
 
   function buildDedupeProfile(repoData, fields, fieldMapping) {
@@ -874,6 +1032,31 @@
     return data.tenant_access_token;
   }
 
+  async function resolveWikiNodeInfo(nodeToken, tenantAccessToken) {
+    const response = await fetchWithTimeout(
+      `https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node?token=${encodeURIComponent(nodeToken)}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${tenantAccessToken}`,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    const data = await safeReadJson(response);
+    if (!response.ok || data.code !== 0) {
+      throw new Error(data.msg || `解析知识库节点失败：HTTP ${response.status}`);
+    }
+
+    const node = data.data && data.data.node ? data.data.node : {};
+    return {
+      nodeToken: cleanSingleLine(node.node_token || node.token || nodeToken),
+      objToken: cleanSingleLine(node.obj_token),
+      objType: cleanSingleLine(node.obj_type)
+    };
+  }
+
   async function createFeishuRecord(config, fields, dedupeProfile, fieldMapping) {
     const tenantAccessToken = await getFeishuTenantAccessToken(config);
     const tableKey = getCollectionTableKey(config);
@@ -885,23 +1068,18 @@
       targetIdentity ? `开始去重检查：${targetIdentity}` : "开始去重检查：未提取到标准仓库标识"
     );
 
+    let cacheHit = null;
     if (dedupeProfile.cacheKeys.length > 0) {
-      const cacheHit = await getCollectionCacheHit(tableKey, dedupeProfile.cacheKeys);
+      cacheHit = await getCollectionCacheHit(tableKey, dedupeProfile.cacheKeys);
       if (cacheHit) {
-        await appendLog("info", "dedupe", `本地缓存命中：${cacheHit.identity}`);
-        return {
-          record: {
-            record_id: cacheHit.recordId || ""
-          },
-          skippedDuplicate: true,
-          duplicateReason: `本地缓存：${cacheHit.identity}`
-        };
+        await appendLog("info", "dedupe", `本地缓存命中：${cacheHit.identity}，正在复核飞书记录`);
+      } else {
+        await appendLog(
+          "info",
+          "dedupe",
+          `本地缓存未命中：${targetIdentity || dedupeProfile.cacheKeys.slice(0, 2).join(" / ")}`
+        );
       }
-      await appendLog(
-        "info",
-        "dedupe",
-        `本地缓存未命中：${targetIdentity || dedupeProfile.cacheKeys.slice(0, 2).join(" / ")}`
-      );
     }
 
     const duplicateMatch = await findExistingFeishuRecord(
@@ -925,6 +1103,11 @@
         skippedDuplicate: true,
         duplicateReason: duplicateMatch.identity ? `飞书匹配：${duplicateMatch.identity}` : "飞书匹配"
       };
+    }
+
+    if (cacheHit && dedupeProfile.cacheKeys.length > 0) {
+      await removeCollectionCacheEntries(tableKey, dedupeProfile.cacheKeys);
+      await appendLog("info", "dedupe", "本地缓存已过期，已自动移除并继续创建新记录");
     }
 
     await appendLog("info", "dedupe", "飞书记录未命中，继续创建新记录");
@@ -1055,16 +1238,9 @@
   }
 
   async function normalizeFieldsForFeishu(config, tenantAccessToken, fields) {
+    let fieldTypeMap;
     try {
-      const fieldTypeMap = await listFeishuFieldTypes(config, tenantAccessToken);
-      const normalized = {};
-
-      for (const [fieldName, value] of Object.entries(fields)) {
-        normalized[fieldName] = normalizeFeishuFieldValue(value, fieldTypeMap[fieldName]);
-      }
-
-      await appendLog("info", "feishu", `字段类型已识别：${Object.keys(fieldTypeMap).length} 个字段`);
-      return normalized;
+      fieldTypeMap = await listFeishuFieldTypes(config, tenantAccessToken);
     } catch (error) {
       await appendLog("warn", "feishu", `读取字段类型失败，回退到保守模式：${toMessage(error)}`);
       return Object.fromEntries(
@@ -1074,9 +1250,29 @@
         ])
       );
     }
+
+    const normalized = {};
+    const skippedFields = [];
+
+    for (const [fieldName, value] of Object.entries(fields)) {
+      if (!Object.prototype.hasOwnProperty.call(fieldTypeMap, fieldName)) {
+        skippedFields.push(fieldName);
+        continue;
+      }
+      normalized[fieldName] = normalizeFeishuFieldValue(value, fieldTypeMap[fieldName]);
+    }
+
+    await appendLog("info", "feishu", `字段类型已识别：${Object.keys(fieldTypeMap).length} 个字段`);
+    if (skippedFields.length > 0) {
+      await appendLog("warn", "feishu", `以下字段在当前表中不存在，已自动跳过：${skippedFields.join("、")}`);
+    }
+    if (Object.keys(normalized).length === 0) {
+      throw new Error("当前字段映射没有命中任何飞书列，请先在“飞书”页读取字段并完成字段映射。");
+    }
+    return normalized;
   }
 
-  async function listFeishuFieldTypes(config, tenantAccessToken) {
+  async function listFeishuFields(config, tenantAccessToken) {
     const response = await fetchWithTimeout(
       `https://open.feishu.cn/open-apis/bitable/v1/apps/${config.feishuBitableAppToken}/tables/${config.feishuTableId}/fields?page_size=500`,
       {
@@ -1094,15 +1290,17 @@
     }
 
     const items = data.data && Array.isArray(data.data.items) ? data.data.items : [];
-    const fieldTypeMap = {};
+    return items
+      .filter((item) => item && item.field_name)
+      .map((item) => ({
+        name: item.field_name,
+        type: item.type
+      }));
+  }
 
-    for (const item of items) {
-      if (item && item.field_name) {
-        fieldTypeMap[item.field_name] = item.type;
-      }
-    }
-
-    return fieldTypeMap;
+  async function listFeishuFieldTypes(config, tenantAccessToken) {
+    const items = await listFeishuFields(config, tenantAccessToken);
+    return Object.fromEntries(items.map((item) => [item.name, item.type]));
   }
 
   function normalizeFeishuFieldValue(value, fieldType) {
@@ -1155,6 +1353,31 @@
     }
 
     return null;
+  }
+
+  async function removeCollectionCacheEntries(tableKey, identities) {
+    const identityList = Array.isArray(identities) ? identities.filter(Boolean) : [identities].filter(Boolean);
+    if (!tableKey || identityList.length === 0) {
+      return;
+    }
+
+    const stored = await chrome.storage.local.get({ [COLLECTION_INDEX_KEY]: {} });
+    const index = isPlainObject(stored[COLLECTION_INDEX_KEY]) ? stored[COLLECTION_INDEX_KEY] : {};
+    const tableCache = isPlainObject(index[tableKey]) ? { ...index[tableKey] } : {};
+    const globalCache = isPlainObject(index[GLOBAL_COLLECTION_TABLE_KEY])
+      ? { ...index[GLOBAL_COLLECTION_TABLE_KEY] }
+      : {};
+
+    identityList.forEach((identity) => {
+      delete tableCache[identity];
+      if (globalCache[identity] && (!globalCache[identity].tableKey || globalCache[identity].tableKey === tableKey)) {
+        delete globalCache[identity];
+      }
+    });
+
+    index[tableKey] = pruneCollectionCache(tableCache);
+    index[GLOBAL_COLLECTION_TABLE_KEY] = pruneCollectionCache(globalCache);
+    await chrome.storage.local.set({ [COLLECTION_INDEX_KEY]: index });
   }
 
   async function upsertCollectionCache(tableKey, identities, recordId, fingerprint) {
