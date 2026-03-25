@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GitHub Feishu Collector</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero">
+        <div class="hero__topline">
+          <div class="hero__brand">
+            <img class="hero__logo" src="icons/collector-mark.svg" alt="Collector 标志" />
+            <div class="hero__eyebrow">GitHub Collector</div>
+          </div>
+          <div class="hero__version" id="versionText">v--</div>
+        </div>
+        <h1 class="hero__title">看到好项目，顺手收进飞书</h1>
+        <p class="hero__subtitle">
+          纯扩展直连，不依赖本地服务。配置模型和飞书后，打开任意 GitHub 仓库页就能一键采集。
+        </p>
+
+        <div class="hero__meta">
+          <span class="hero-chip hero-chip--service" id="modeStatus" data-state="online">纯扩展直连</span>
+          <span class="hero-chip hero-chip--service" id="configStatus" data-state="warn">检查配置中...</span>
+          <span class="hero-chip hero-chip--repo" id="repoStatus" data-state="warn">正在识别当前页面...</span>
+        </div>
+      </section>
+
+      <section class="quick-start">
+        <div class="quick-start__header">
+          <div>
+            <div class="quick-start__title">推荐顺序</div>
+            <div class="quick-start__desc" id="quickStartDesc">建议先完成基础配置和接口测试，再开始采集。</div>
+          </div>
+          <button class="btn btn--secondary btn--mini" id="guideToggleBtn" type="button">查看引导</button>
+        </div>
+        <div class="quick-start__row" aria-hidden="true">
+          <div class="workflow-pill">1. 配模型</div>
+          <div class="workflow-pill">2. 配飞书</div>
+          <div class="workflow-pill">3. 一键采集</div>
+        </div>
+      </section>
+
+      <nav class="tabbar" aria-label="功能切换">
+        <button class="tabbar__item is-active" id="tabCollectBtn" type="button" data-tab="collect">采集</button>
+        <button class="tabbar__item" id="tabModelBtn" type="button" data-tab="model">模型</button>
+        <button class="tabbar__item" id="tabFeishuBtn" type="button" data-tab="feishu">飞书</button>
+        <button class="tabbar__item" id="tabLogsBtn" type="button" data-tab="logs">日志</button>
+      </nav>
+
+      <section class="panel tab-panel" id="collectPanel" data-panel="collect">
+        <div class="panel__heading">
+          <div>
+            <div class="panel__title">当前仓库</div>
+            <div class="panel__value">
+              这里专注一件事：识别当前 GitHub 仓库，并把整理后的项目信息写入飞书多维表格。
+            </div>
+          </div>
+        </div>
+
+        <section class="wizard-card" id="setupGuideCard">
+          <div class="wizard-card__title">首次使用向导</div>
+          <div class="wizard-card__desc">第一次接入时，按下面顺序走一遍，后续就可以直接一键采集。</div>
+
+          <div class="wizard-step">
+            <div>
+              <div class="wizard-step__title">第 1 步：完成模型配置</div>
+              <div class="wizard-step__desc">填写模型接口地址、API Key 和模型名称。</div>
+            </div>
+            <div class="wizard-step__side">
+              <div class="wizard-step__state" id="wizardModelState">待完成</div>
+              <button class="btn btn--secondary btn--mini" id="wizardToModelBtn" type="button">去模型页</button>
+            </div>
+          </div>
+
+          <div class="wizard-step">
+            <div>
+              <div class="wizard-step__title">第 2 步：完成飞书配置</div>
+              <div class="wizard-step__desc">填写应用信息、目标表信息，并确认字段映射。</div>
+            </div>
+            <div class="wizard-step__side">
+              <div class="wizard-step__state" id="wizardFeishuState">待完成</div>
+              <button class="btn btn--secondary btn--mini" id="wizardToFeishuBtn" type="button">去飞书页</button>
+            </div>
+          </div>
+
+          <div class="wizard-step">
+            <div>
+              <div class="wizard-step__title">第 3 步：检查接口连通性</div>
+              <div class="wizard-step__desc">建议先测模型、再测飞书，避免采集时才发现配置问题。</div>
+            </div>
+            <div class="wizard-step__side wizard-step__side--stack">
+              <div class="wizard-step__state" id="wizardTestState">未测试</div>
+              <div class="wizard-step__actions">
+                <button class="btn btn--secondary btn--mini" id="wizardTestModelBtn" type="button">测试模型</button>
+                <button class="btn btn--secondary btn--mini" id="wizardTestFeishuBtn" type="button">测试飞书</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="wizard-step">
+            <div>
+              <div class="wizard-step__title">第 4 步：采集当前仓库</div>
+              <div class="wizard-step__desc">回到 GitHub 仓库页后，点击保存当前项目即可写入飞书。</div>
+            </div>
+            <div class="wizard-step__side">
+              <div class="wizard-step__state" id="wizardCollectState">待执行</div>
+              <button class="btn btn--primary btn--mini" id="wizardCollectBtn" type="button">立即采集</button>
+            </div>
+          </div>
+        </section>
+
+        <div class="repo-card" id="repoCard">
+          <div class="repo-card__label">识别结果</div>
+          <div class="repo-card__value" id="repoCardTitle">等待识别</div>
+          <div class="repo-card__hint" id="repoCardHint">请切到一个 GitHub 仓库主页。</div>
+        </div>
+
+        <div class="status-grid">
+          <div class="mini-card">
+            <div class="mini-card__label">模型状态</div>
+            <div class="mini-card__value" id="modelReadyText">待配置</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-card__label">飞书状态</div>
+            <div class="mini-card__value" id="feishuReadyText">待配置</div>
+          </div>
+          <div class="mini-card mini-card--memory">
+            <div class="mini-card__label">已记住项目</div>
+            <div class="mini-card__value" id="cacheSummaryText">0 条</div>
+            <div class="mini-card__hint">
+              这里统计的是当前表的本地去重记忆，用来更快跳过重复，不等于飞书里的真实总记录数。
+            </div>
+          </div>
+        </div>
+
+        <div class="result-card result-card--empty" id="recentResultCard">
+          <div class="result-card__top">
+            <div class="result-card__visual" id="recentResultVisual" aria-hidden="true">
+              <svg class="result-card__illustration" viewBox="0 0 180 120" role="presentation">
+                <defs>
+                  <linearGradient id="emptyCardGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#dff6ef" />
+                    <stop offset="100%" stop-color="#fef5de" />
+                  </linearGradient>
+                </defs>
+                <rect x="20" y="18" width="88" height="64" rx="18" fill="url(#emptyCardGradient)" />
+                <rect x="34" y="34" width="54" height="8" rx="4" fill="#0f8c77" opacity="0.28" />
+                <rect x="34" y="50" width="36" height="8" rx="4" fill="#0f8c77" opacity="0.16" />
+                <rect x="102" y="32" width="56" height="38" rx="16" fill="#112e46" opacity="0.08" />
+                <path d="M113 53h34" stroke="#112e46" stroke-width="6" stroke-linecap="round" opacity="0.18" />
+                <circle cx="138" cy="88" r="16" fill="#0f8c77" opacity="0.12" />
+                <path d="M131 88l5 5 9-10" stroke="#0f8c77" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </div>
+            <div class="result-card__main">
+              <div class="result-card__label">最近一次结果</div>
+              <div class="result-card__badges">
+                <span class="result-pill result-pill--neutral" id="recentResultBadge">等待采集</span>
+                <span class="result-pill result-pill--neutral" id="recentResultAi">尚未生成</span>
+              </div>
+              <div class="result-card__title" id="recentResultRepo">还没有采集记录</div>
+              <div class="result-card__meta" id="recentResultMeta">完成一次采集后，这里会显示最近一次写入或跳过重复的结果。</div>
+              <a class="result-card__link hidden" id="recentResultLink" href="#" target="_blank" rel="noreferrer">打开 GitHub 仓库</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="action-stack">
+          <button class="btn btn--primary" id="collectBtn" type="button">保存当前项目</button>
+          <div class="action-grid">
+            <button class="btn btn--secondary" id="testModelBtn" type="button">测试模型</button>
+            <button class="btn btn--secondary" id="testFeishuBtn" type="button">测试飞书</button>
+          </div>
+        </div>
+
+        <div class="inline-note">
+          采集时会先读取 GitHub 信息，再尝试调用模型生成简介、分类和标签，最后写入飞书。测试结果统一显示在下方“运行反馈”里。
+        </div>
+      </section>
+
+      <section class="panel tab-panel hidden" id="modelPanel" data-panel="model">
+        <div class="panel__heading">
+          <div>
+            <div class="panel__title">自定义模型接口</div>
+            <div class="panel__value">
+              这里只负责保存模型接口和 GitHub Token。当前版本默认按 OpenAI 兼容的 `chat/completions` 接口调用。
+            </div>
+          </div>
+        </div>
+
+        <details class="help-panel" id="modelHelpPanel">
+          <summary class="help-panel__summary">查看模型配置说明与示例</summary>
+          <div class="guide-grid guide-grid--single">
+            <article class="guide-card">
+              <div class="guide-card__title">模型接口地址怎么填</div>
+              <div class="guide-card__text">
+                建议填写兼容 OpenAI 的 `/v1` 根地址，例如 `https://api.openai.com/v1` 或 `https://api.example.com/v1`。如果服务商给的是完整
+                `/chat/completions` 地址，也可以直接填写。
+              </div>
+            </article>
+            <article class="guide-card">
+              <div class="guide-card__title">模型名称怎么填</div>
+              <div class="guide-card__text">
+                填服务商后台显示的真实模型名，例如 `gpt-4o-mini`、`gemini-3.1-flash-lite`。名称需要和平台支持的模型完全一致。
+              </div>
+            </article>
+            <article class="guide-card">
+              <div class="guide-card__title">GitHub Token 的作用</div>
+              <div class="guide-card__text">
+                公开仓库场景可以先不填，但加上 Token 后，读取 GitHub 仓库信息会更稳定，也更不容易遇到限流。
+              </div>
+            </article>
+          </div>
+        </details>
+
+        <label class="field-label" for="openaiBaseUrlInput">模型接口地址</label>
+        <input class="field" id="openaiBaseUrlInput" type="url" placeholder="例如 https://api.example.com/v1" spellcheck="false" />
+        <div class="field-hint">扩展会自动补成 `chat/completions` 调用地址，所以大多数平台直接填写 `/v1` 即可。</div>
+
+        <label class="field-label" for="openaiApiKeyInput">模型 API Key</label>
+        <input class="field" id="openaiApiKeyInput" type="password" placeholder="sk-..." spellcheck="false" autocomplete="off" />
+        <div class="field-hint">密钥保存在当前浏览器扩展的本地存储中，请在受信设备上使用并妥善管理。</div>
+
+        <label class="field-label" for="openaiModelInput">模型名称</label>
+        <input class="field" id="openaiModelInput" type="text" placeholder="例如 gpt-4o-mini 或 gemini-3.1-flash-lite" spellcheck="false" />
+        <div class="field-hint">采集项目简介、分类和标签时会使用这里配置的模型。</div>
+
+        <label class="field-label" for="githubTokenInput">GitHub Token（可选）</label>
+        <input class="field" id="githubTokenInput" type="password" placeholder="公开仓库可以不填，但更容易遇到限流" spellcheck="false" autocomplete="off" />
+        <div class="field-hint">不填也能使用；填写后读取 GitHub 仓库信息会更稳定。</div>
+
+        <div class="action-stack">
+          <button class="btn btn--primary" id="saveModelBtn" type="button">保存模型配置</button>
+        </div>
+
+        <div class="inline-note">这里仅做配置，不展示测试结果。测试模型请回到“采集”页点击“测试模型”。</div>
+      </section>
+
+      <section class="panel tab-panel hidden" id="feishuPanel" data-panel="feishu">
+        <div class="panel__heading">
+          <div>
+            <div class="panel__title">飞书配置</div>
+            <div class="panel__value">这里保存飞书应用、多维表格和字段映射信息。测试结果统一显示在下方“运行反馈”里。</div>
+          </div>
+        </div>
+
+        <details class="help-panel" id="feishuHelpPanel">
+          <summary class="help-panel__summary">查看飞书配置说明与示例</summary>
+          <div class="guide-grid guide-grid--single">
+            <article class="guide-card">
+              <div class="guide-card__title">App ID / App Secret</div>
+              <div class="guide-card__text">到飞书开放平台的自建应用详情页获取，通常在“凭证与基础信息”里可以看到。</div>
+            </article>
+            <article class="guide-card">
+              <div class="guide-card__title">App Token / Table ID</div>
+              <div class="guide-card__text">打开目标多维表格，从地址栏里拿。`/base/` 后面通常是 App Token，`table=tbl...` 那段通常是 Table ID。</div>
+            </article>
+            <article class="guide-card">
+              <div class="guide-card__title">字段映射什么时候要改</div>
+              <div class="guide-card__text">如果你的表头不是默认的“标题、链接、简介、分类”这一套，就在下面把字段名改成你自己的表头。</div>
+            </article>
+          </div>
+        </details>
+
+        <label class="field-label" for="feishuAppIdInput">飞书 App ID</label>
+        <input class="field" id="feishuAppIdInput" type="password" placeholder="cli_xxx" spellcheck="false" autocomplete="off" />
+
+        <label class="field-label" for="feishuAppSecretInput">飞书 App Secret</label>
+        <input class="field" id="feishuAppSecretInput" type="password" placeholder="应用密钥" spellcheck="false" autocomplete="off" />
+
+        <label class="field-label" for="feishuAppTokenInput">多维表格 App Token</label>
+        <input class="field" id="feishuAppTokenInput" type="password" placeholder="bascn..." spellcheck="false" autocomplete="off" />
+
+        <label class="field-label" for="feishuTableIdInput">数据表 Table ID</label>
+        <input class="field" id="feishuTableIdInput" type="password" placeholder="tbl..." spellcheck="false" autocomplete="off" />
+
+        <details class="mapping-panel" id="fieldMappingPanel">
+          <summary class="mapping-panel__summary">字段映射</summary>
+          <div class="mapping-panel__desc">把左侧系统字段映射到你当前飞书表里的真实列名。留空时会自动回退到默认字段名。</div>
+          <div class="mapping-grid">
+            <label class="mapping-field">
+              <span class="mapping-field__label">标题</span>
+              <input class="field field--compact" id="mappingTitleInput" type="text" data-mapping-key="title" spellcheck="false" />
+            </label>
+            <label class="mapping-field">
+              <span class="mapping-field__label">链接</span>
+              <input class="field field--compact" id="mappingLinkInput" type="text" data-mapping-key="link" spellcheck="false" />
+            </label>
+            <label class="mapping-field">
+              <span class="mapping-field__label">简介</span>
+              <input class="field field--compact" id="mappingSummaryInput" type="text" data-mapping-key="summary" spellcheck="false" />
+            </label>
+            <label class="mapping-field">
+              <span class="mapping-field__label">分类</span>
+              <input class="field field--compact" id="mappingCategoryInput" type="text" data-mapping-key="category" spellcheck="false" />
+            </label>
+            <label class="mapping-field">
+              <span class="mapping-field__label">星标</span>
+              <input class="field field--compact" id="mappingStarsInput" type="text" data-mapping-key="stars" spellcheck="false" />
+            </label>
+            <label class="mapping-field">
+              <span class="mapping-field__label">Fork</span>
+              <input class="field field--compact" id="mappingForksInput" type="text" data-mapping-key="forks" spellcheck="false" />
+            </label>
+            <label class="mapping-field">
+              <span class="mapping-field__label">语言</span>
+              <input class="field field--compact" id="mappingLanguageInput" type="text" data-mapping-key="language" spellcheck="false" />
+            </label>
+            <label class="mapping-field">
+              <span class="mapping-field__label">Topics</span>
+              <input class="field field--compact" id="mappingTopicsInput" type="text" data-mapping-key="topics" spellcheck="false" />
+            </label>
+            <label class="mapping-field">
+              <span class="mapping-field__label">作者</span>
+              <input class="field field--compact" id="mappingAuthorInput" type="text" data-mapping-key="author" spellcheck="false" />
+            </label>
+            <label class="mapping-field">
+              <span class="mapping-field__label">仓库名</span>
+              <input class="field field--compact" id="mappingRepoInput" type="text" data-mapping-key="repo" spellcheck="false" />
+            </label>
+            <label class="mapping-field">
+              <span class="mapping-field__label">主页</span>
+              <input class="field field--compact" id="mappingHomepageInput" type="text" data-mapping-key="homepage" spellcheck="false" />
+            </label>
+            <label class="mapping-field">
+              <span class="mapping-field__label">更新时间</span>
+              <input class="field field--compact" id="mappingUpdatedAtInput" type="text" data-mapping-key="updatedAt" spellcheck="false" />
+            </label>
+            <label class="mapping-field">
+              <span class="mapping-field__label">来源</span>
+              <input class="field field--compact" id="mappingSourceInput" type="text" data-mapping-key="source" spellcheck="false" />
+            </label>
+          </div>
+          <div class="mapping-panel__actions">
+            <button class="btn btn--secondary btn--mini" id="resetFieldMappingBtn" type="button">恢复默认字段名</button>
+          </div>
+        </details>
+
+        <div class="warning-note">
+          纯扩展模式会把密钥保存在浏览器扩展本地存储中。多人协作、统一权限管理或长期共享场景，建议改为服务端方案。
+        </div>
+
+        <div class="action-grid">
+          <button class="btn btn--primary" id="saveFeishuBtn" type="button">保存飞书配置</button>
+          <button class="btn btn--ghost" id="clearSecretsBtn" type="button">清空密钥</button>
+        </div>
+      </section>
+
+      <section class="panel tab-panel hidden" id="logsPanel" data-panel="logs">
+        <div class="panel__heading">
+          <div>
+            <div class="panel__title">最近日志</div>
+            <div class="panel__value">如果采集失败、跳过异常或去重不符合预期，先来这里看流程停在了哪一步。</div>
+          </div>
+        </div>
+
+        <div class="action-grid action-grid--logs">
+          <button class="btn btn--secondary" id="refreshLogsBtn" type="button">刷新日志</button>
+          <button class="btn btn--ghost" id="clearLogsBtn" type="button">清空日志</button>
+          <button class="btn btn--secondary" id="copyLogsBtn" type="button">复制日志</button>
+          <button class="btn btn--secondary" id="clearCacheBtn" type="button">清空去重缓存</button>
+        </div>
+
+        <pre class="log-box" id="logOutput">暂无日志</pre>
+      </section>
+
+      <section class="panel panel--feedback">
+        <div class="panel__label">运行反馈</div>
+        <div class="feedback-box" id="feedbackText" data-tone="neutral">
+          第一次使用时，先到“模型”和“飞书”页完成配置，然后再回到 GitHub 仓库页采集。
+        </div>
+      </section>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

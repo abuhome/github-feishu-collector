@@ -1,0 +1,38 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="36" y1="28" x2="222" y2="228" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#123553"/>
+      <stop offset="0.58" stop-color="#0F8C77"/>
+      <stop offset="1" stop-color="#19A98D"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="74" y1="77" x2="165" y2="171" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#EAF8F3"/>
+    </linearGradient>
+    <filter id="shadow" x="18" y="16" width="220" height="224" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+      <feOffset dy="10"/>
+      <feGaussianBlur stdDeviation="14"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.0470588 0 0 0 0 0.211765 0 0 0 0 0.317647 0 0 0 0.24 0"/>
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1_1"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_1" result="shape"/>
+    </filter>
+  </defs>
+
+  <rect x="20" y="20" width="216" height="216" rx="54" fill="url(#bg)"/>
+  <circle cx="188" cy="72" r="22" fill="white" fill-opacity="0.12"/>
+  <circle cx="70" cy="186" r="28" fill="white" fill-opacity="0.08"/>
+
+  <g filter="url(#shadow)" transform="rotate(-13 128 128)">
+    <path d="M90 64H158C166.837 64 174 71.1634 174 80V104.373C174 108.617 172.314 112.687 169.314 115.686L132.686 152.314C129.687 155.314 125.617 157 121.373 157H90C81.1634 157 74 149.837 74 141V80C74 71.1634 81.1634 64 90 64Z" fill="url(#panel)"/>
+    <circle cx="153" cy="85" r="9" fill="#BEEBDE"/>
+    <rect x="94" y="91" width="54" height="44" rx="12" fill="#0E7C6D"/>
+    <rect x="101" y="98" width="17" height="13" rx="4" fill="#DFFBF2"/>
+    <rect x="124" y="98" width="17" height="13" rx="4" fill="#88DFC7"/>
+    <rect x="101" y="115" width="17" height="13" rx="4" fill="#88DFC7"/>
+    <rect x="124" y="115" width="17" height="13" rx="4" fill="#DFFBF2"/>
+  </g>
+
+  <path d="M156 160C171.655 160 184.8 147.88 186.082 132.278L198.184 144.379C201.111 147.307 205.858 147.307 208.786 144.379C211.714 141.451 211.714 136.704 208.786 133.776L184.309 109.299C181.381 106.371 176.634 106.371 173.706 109.299L149.229 133.776C146.301 136.704 146.301 141.451 149.229 144.379C152.157 147.307 156.904 147.307 159.832 144.379L171.072 133.139C170.771 140.968 164.313 147.25 156 147.25H119C114.858 147.25 111.5 150.608 111.5 154.75C111.5 158.892 114.858 162.25 119 162.25L156 162.25Z" fill="#F4FFFB"/>
+</svg>
